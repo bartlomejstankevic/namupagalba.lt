@@ -378,6 +378,23 @@ export default function App() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [activeLegalDoc, setActiveLegalDoc] = useState(null); // null | 'gdpr' | 'terms' | 'cookies'
 
+  // --- PRISIJUNGIMO BŪSENOS (KLIENTAS / MEISTRAS / ADMIN) ---
+  const [loginModalRole, setLoginModalRole] = useState(null); // null | 'client' | 'master' | 'admin'
+  const [isClientLoggedIn, setIsClientLoggedIn] = useState(false);
+  const [clientSession, setClientSession] = useState({ name: '', phone: '' });
+  const [clientLoginForm, setClientLoginForm] = useState({ name: '', phone: '' });
+  const [clientLoginError, setClientLoginError] = useState('');
+
+  const [isMasterLoggedIn, setIsMasterLoggedIn] = useState(false);
+  const [masterLoginInput, setMasterLoginInput] = useState('+370 612 34567');
+  const [masterLoginSmsCode, setMasterLoginSmsCode] = useState('');
+  const [masterLoginSentCode, setMasterLoginSentCode] = useState('');
+  const [masterLoginError, setMasterLoginError] = useState('');
+
+  const [isAdminLoggedIn, setIsAdminLoggedIn] = useState(false);
+  const [adminLoginForm, setAdminLoginForm] = useState({ email: '', password: '' });
+  const [adminLoginError, setAdminLoginError] = useState('');
+
   // --- DUOMENŲ BŪSENOS ---
   const [categories, setCategories] = useState(INITIAL_CATEGORIES);
   const [masters, setMasters] = useState(INITIAL_MASTERS);
@@ -522,7 +539,9 @@ export default function App() {
     setJobForm((prev) => ({
       ...prev,
       city: city || prev.city,
-      category: category || prev.category
+      category: category || prev.category,
+      clientName: isClientLoggedIn && clientSession.name ? clientSession.name : prev.clientName,
+      clientPhone: isClientLoggedIn && clientSession.phone ? clientSession.phone : prev.clientPhone
     }));
     setClientSubView('form');
     setActiveView('client');
@@ -545,29 +564,167 @@ export default function App() {
     });
   };
 
-  const handleNavSectionClick = (section) => {
+  // --- ROLE-BASED PRISIJUNGIMO VALDYMAS ---
+  const openRoleLoginModal = (role) => {
     setMobileMenuOpen(false);
-    if (section === 'services' || section === 'how') {
-      if (activeView !== 'home') {
-        setActiveView('home');
-        setTimeout(() => scrollToSection(howItWorksRef), 60);
-      } else {
-        scrollToSection(howItWorksRef);
+    if (role === 'client') {
+      if (isClientLoggedIn) {
+        setClientSubView('form');
+        setActiveView('client');
+        return;
       }
-    } else if (section === 'catalog') {
-      if (activeView !== 'home') {
-        setActiveView('home');
-        setTimeout(() => scrollToSection(catalogSectionRef), 60);
-      } else {
-        scrollToSection(catalogSectionRef);
+      setClientLoginForm({
+        name: clientSession.name || jobForm.clientName || '',
+        phone: clientSession.phone || jobForm.clientPhone || ''
+      });
+      setClientLoginError('');
+      setLoginModalRole('client');
+      return;
+    }
+
+    if (role === 'master') {
+      if (isMasterLoggedIn && currentMaster) {
+        setActiveView('master');
+        return;
       }
-    } else if (section === 'faq') {
-      if (activeView !== 'home') {
-        setActiveView('home');
-        setTimeout(() => scrollToSection(faqSectionRef), 60);
-      } else {
-        scrollToSection(faqSectionRef);
+      setMasterLoginSentCode('');
+      setMasterLoginSmsCode('');
+      setMasterLoginError('');
+      setLoginModalRole('master');
+      return;
+    }
+
+    if (role === 'admin') {
+      if (isAdminLoggedIn) {
+        setActiveView('admin');
+        return;
       }
+      setAdminLoginForm({ email: '', password: '' });
+      setAdminLoginError('');
+      setLoginModalRole('admin');
+    }
+  };
+
+  const handleClientLoginSubmit = (e) => {
+    e.preventDefault();
+    const cleanPhone = clientLoginForm.phone.trim();
+    if (!cleanPhone) {
+      setClientLoginError('Įveskite savo telefono numerį.');
+      return;
+    }
+    const cleanName = clientLoginForm.name.trim() || 'Klientas';
+    setClientSession({ name: cleanName, phone: cleanPhone });
+    setIsClientLoggedIn(true);
+    setJobForm((prev) => ({
+      ...prev,
+      clientName: cleanName,
+      clientPhone: cleanPhone
+    }));
+    setClientLoginError('');
+    setLoginModalRole(null);
+    setClientSubView('form');
+    setActiveView('client');
+    notify(`Prisijungėte kaip klientas (${cleanName}).`);
+  };
+
+  const handleSendMasterLoginCode = () => {
+    const cleanPhone = masterLoginInput.trim();
+    if (!cleanPhone) {
+      setMasterLoginError('Įveskite meistro telefono numerį.');
+      return;
+    }
+    const matchedMaster = masters.find(
+      (m) => m.phone.replace(/\s+/g, '') === cleanPhone.replace(/\s+/g, '')
+    );
+    if (!matchedMaster) {
+      setMasterLoginError(
+        'Meistras su tokiu telefono numeriu nerastas. Patikrinkite numerį arba spauskite „Tapti meistru“.'
+      );
+      return;
+    }
+    const code = String(Math.floor(1000 + Math.random() * 9000));
+    setCurrentMasterId(matchedMaster.id);
+    setMasterLoginSentCode(code);
+    setMasterLoginSmsCode(code);
+    setMasterLoginError('');
+    notify(`SMS kodas išsiųstas meistrui ${matchedMaster.name} (${matchedMaster.phone}).`);
+  };
+
+  const handleMasterLoginSubmit = (e) => {
+    e.preventDefault();
+    const cleanPhone = masterLoginInput.trim();
+    const matchedMaster =
+      masters.find((m) => m.phone.replace(/\s+/g, '') === cleanPhone.replace(/\s+/g, '')) ||
+      masters.find((m) => m.id === currentMasterId);
+
+    if (!matchedMaster) {
+      setMasterLoginError('Nerastas meistro profilis.');
+      return;
+    }
+
+    if (matchedMaster.status === 'uzblokuotas') {
+      setMasterLoginError('Ši meistro paskyra yra užblokuota. Kreipkitės į administratorių.');
+      return;
+    }
+
+    if (!masterLoginSentCode) {
+      setMasterLoginError('Pirmiausia paspauskite „Gauti SMS kodą“ arba naudokite greitą prisijungimą.');
+      return;
+    }
+
+    if (masterLoginSmsCode.trim() !== masterLoginSentCode) {
+      setMasterLoginError('Neteisingas SMS patvirtinimo kodas.');
+      return;
+    }
+
+    setCurrentMasterId(matchedMaster.id);
+    setIsMasterLoggedIn(true);
+    setMasterLoginError('');
+    setLoginModalRole(null);
+    setActiveView('master');
+    notify(`Sveiki sugrįžę, ${matchedMaster.name}!`);
+  };
+
+  const handleAdminLoginSubmit = (e) => {
+    e.preventDefault();
+    const cleanEmail = adminLoginForm.email.trim().toLowerCase();
+    const cleanPass = adminLoginForm.password.trim();
+    if (!cleanEmail || !cleanPass) {
+      setAdminLoginError('Įveskite administratoriaus el. paštą ir slaptažodį.');
+      return;
+    }
+    const isValidAdmin =
+      (cleanEmail === 'admin@namupagalba.lt' && cleanPass.length >= 4) ||
+      (cleanEmail.includes('admin') && cleanPass.length >= 6);
+
+    if (!isValidAdmin) {
+      setAdminLoginError(
+        'Neteisingi duomenys. Naudokite admin@namupagalba.lt ir slaptažodį (bent 6 simboliai).'
+      );
+      return;
+    }
+
+    setIsAdminLoggedIn(true);
+    setAdminLoginError('');
+    setLoginModalRole(null);
+    setActiveView('admin');
+    notify('Sėkmingai prisijungėte prie administratoriaus panelės.');
+  };
+
+  const handleLogoutRole = (role) => {
+    if (role === 'client') {
+      setIsClientLoggedIn(false);
+      setClientSession({ name: '', phone: '' });
+      if (activeView === 'client') setActiveView('home');
+      notify('Atsijungėte nuo kliento paskyros.');
+    } else if (role === 'master') {
+      setIsMasterLoggedIn(false);
+      if (activeView === 'master') setActiveView('home');
+      notify('Atsijungėte nuo meistro kabineto.');
+    } else if (role === 'admin') {
+      setIsAdminLoggedIn(false);
+      if (activeView === 'admin') setActiveView('home');
+      notify('Atsijungėte nuo administratoriaus panelės.');
     }
   };
 
@@ -1453,49 +1610,45 @@ export default function App() {
           </div>
         </button>
 
-        {/* Režimų perjungiklis (Kliento režimas / Meistro kabinetas / Admin) */}
-        <div className="order-3 sm:order-2 w-full sm:w-auto flex items-center justify-between sm:justify-start bg-slate-100 p-1 rounded-2xl border border-slate-200/80">
+        {/* 3 aiškiai atskirti vaidmenų mygtukai: Klientas / Meistras / Admin */}
+        <div className="order-3 sm:order-2 w-full sm:w-auto flex items-center justify-between sm:justify-start gap-1.5 bg-slate-100 p-1 rounded-2xl border border-slate-200/80">
           <button
             type="button"
-            onClick={() => {
-              setActiveView('client');
-              setClientSubView('form');
-              setMobileMenuOpen(false);
-            }}
-            className={`flex-1 sm:flex-initial px-2 sm:px-3.5 py-2 sm:py-1.5 rounded-xl text-[11px] sm:text-xs font-bold transition cursor-pointer text-center ${
+            onClick={() => openRoleLoginModal('client')}
+            className={`flex-1 sm:flex-initial px-2.5 sm:px-3.5 py-2 sm:py-1.5 rounded-xl text-[11px] sm:text-xs font-bold transition cursor-pointer text-center flex items-center justify-center gap-1 ${
               activeView === 'client'
                 ? 'bg-white text-blue-600 shadow-2xs border border-blue-100'
-                : 'text-slate-600 hover:text-slate-900'
+                : 'text-slate-700 hover:text-slate-950 hover:bg-white/60'
             }`}
           >
-            Kliento režimas
+            <span>Klientas</span>
+            {isClientLoggedIn && (
+              <span className="w-2 h-2 rounded-full bg-emerald-500" title="Prisijungęs" />
+            )}
           </button>
 
           <button
             type="button"
-            onClick={() => {
-              setActiveView('master');
-              setMobileMenuOpen(false);
-            }}
-            className={`flex-1 sm:flex-initial px-2 sm:px-3.5 py-2 sm:py-1.5 rounded-xl text-[11px] sm:text-xs font-bold transition cursor-pointer text-center ${
+            onClick={() => openRoleLoginModal('master')}
+            className={`flex-1 sm:flex-initial px-2.5 sm:px-3.5 py-2 sm:py-1.5 rounded-xl text-[11px] sm:text-xs font-bold transition cursor-pointer text-center flex items-center justify-center gap-1 ${
               activeView === 'master'
                 ? 'bg-white text-blue-600 shadow-2xs border border-blue-100'
-                : 'text-slate-600 hover:text-slate-900'
+                : 'text-slate-700 hover:text-slate-950 hover:bg-white/60'
             }`}
           >
-            Meistro kabinetas
+            <span>Meistras</span>
+            {isMasterLoggedIn && (
+              <span className="w-2 h-2 rounded-full bg-emerald-500" title="Prisijungęs" />
+            )}
           </button>
 
           <button
             type="button"
-            onClick={() => {
-              setActiveView('admin');
-              setMobileMenuOpen(false);
-            }}
-            className={`flex-1 sm:flex-initial px-2 sm:px-3.5 py-2 sm:py-1.5 rounded-xl text-[11px] sm:text-xs font-bold transition flex items-center justify-center gap-1 sm:gap-1.5 cursor-pointer ${
+            onClick={() => openRoleLoginModal('admin')}
+            className={`flex-1 sm:flex-initial px-2.5 sm:px-3.5 py-2 sm:py-1.5 rounded-xl text-[11px] sm:text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
               activeView === 'admin'
                 ? 'bg-slate-900 text-white shadow-2xs'
-                : 'text-slate-700 hover:text-slate-950'
+                : 'text-slate-700 hover:text-slate-950 hover:bg-white/60'
             }`}
           >
             <span>Admin</span>
@@ -1539,7 +1692,7 @@ export default function App() {
           </button>
           <button
             type="button"
-            onClick={() => setActiveView('master')}
+            onClick={() => openRoleLoginModal('master')}
             className="hover:text-slate-900 font-bold text-slate-800 transition cursor-pointer"
           >
             Prisijungti
@@ -2151,9 +2304,16 @@ export default function App() {
       {/* Viršutinis kliento perjungiklis */}
       <div className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-5 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <span className="text-[11px] font-extrabold uppercase tracking-wider text-blue-600">
-            Kliento paskyra
-          </span>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[11px] font-extrabold uppercase tracking-wider text-blue-600">
+              Kliento paskyra
+            </span>
+            {isClientLoggedIn && (
+              <span className="px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[11px] font-bold">
+                ✓ {clientSession.name || 'Klientas'} ({clientSession.phone})
+              </span>
+            )}
+          </div>
           <h1 className="text-xl sm:text-2xl font-black text-slate-900">
             {clientSubView === 'form'
               ? 'Paskelbti užklausą meistrui'
@@ -2199,6 +2359,24 @@ export default function App() {
           >
             Pagalba
           </button>
+
+          {isClientLoggedIn ? (
+            <button
+              type="button"
+              onClick={() => handleLogoutRole('client')}
+              className="px-3.5 py-2.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-xs font-bold text-slate-700 cursor-pointer"
+            >
+              Atsijungti
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => openRoleLoginModal('client')}
+              className="px-3.5 py-2.5 rounded-xl border border-blue-200 bg-blue-50 hover:bg-blue-100 text-xs font-extrabold text-blue-700 cursor-pointer"
+            >
+              Prisijungti
+            </button>
+          )}
         </div>
       </div>
 
@@ -2831,728 +3009,26 @@ export default function App() {
                 {tab.label}
               </button>
             ))}
-          </div>
-        </div>
 
-        {/* SKIRTUKAS: PROFILIS */}
-        {masterSubTab === 'profile' && (
-          <form
-            onSubmit={handleSaveMasterProfile}
-            className="bg-white rounded-2xl border border-slate-200 p-6 shadow-2xs space-y-5"
-          >
-            <h2 className="text-base font-extrabold text-slate-900">Meistro profilio nustatymai</h2>
-
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div className="flex flex-wrap items-center gap-4">
-                {currentMaster.avatarUrl ? (
-                  <img
-                    src={currentMaster.avatarUrl}
-                    alt={currentMaster.name}
-                    className="w-16 h-16 rounded-2xl object-cover border border-slate-200"
-                  />
-                ) : (
-                  <div className="w-16 h-16 rounded-2xl bg-blue-50 text-blue-700 font-black flex items-center justify-center text-lg">
-                    {currentMaster.name
-                      .split(' ')
-                      .map((n) => n[0])
-                      .slice(0, 2)
-                      .join('')}
-                  </div>
-                )}
-
-                <div className="flex flex-wrap items-center gap-2">
-                  <label className="px-3.5 py-2 rounded-xl border border-slate-300 hover:bg-slate-50 text-xs font-bold text-slate-700 cursor-pointer">
-                    Įkelti profilio nuotrauką
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={handleMasterAvatarUpload}
-                      className="hidden"
-                    />
-                  </label>
-                  {currentMaster.avatarUrl && (
-                    <button
-                      type="button"
-                      onClick={handleRemoveMasterAvatar}
-                      className="px-3 py-2 rounded-xl border border-red-200 text-red-600 text-xs font-bold hover:bg-red-50 cursor-pointer"
-                    >
-                      Pašalinti nuotrauką
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              {/* Šalia nuotraukos: atsiliepimų ir įvertinimų blokas */}
+            {isMasterLoggedIn ? (
               <button
                 type="button"
-                onClick={() => setMasterReviewsModalOpen(true)}
-                className="flex items-center gap-3 px-4 py-3 rounded-2xl bg-amber-50 hover:bg-amber-100/80 border border-amber-200 text-left transition cursor-pointer shrink-0"
+                onClick={() => handleLogoutRole('master')}
+                className="px-3.5 py-2 rounded-xl border border-slate-200 hover:bg-slate-50 text-xs font-bold text-slate-700 cursor-pointer"
               >
-                <div className="w-10 h-10 rounded-xl bg-amber-500 text-slate-950 font-black flex items-center justify-center text-sm">
-                  ★ {Number(currentMaster.rating || 5).toFixed(1)}
-                </div>
-                <div>
-                  <div className="text-xs font-black text-slate-900">
-                    Atsiliepimai ir įvertinimai ({currentMaster.reviews.length})
-                  </div>
-                  <div className="text-[11px] font-bold text-amber-800">
-                    Paspauskite peržiūrėti visus →
-                  </div>
-                </div>
+                Atsijungti
               </button>
-            </div>
-
-            <div className="space-y-2">
-              <label className="block text-xs font-extrabold uppercase tracking-wider text-slate-500">
-                Paslaugų sritys
-              </label>
-              <div className="flex flex-wrap gap-2">
-                {categories.map((cat) => {
-                  const active = currentMaster.categories.includes(cat);
-                  return (
-                    <button
-                      key={cat}
-                      type="button"
-                      onClick={() => toggleCurrentMasterCategory(cat)}
-                      className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition cursor-pointer ${
-                        active
-                          ? 'bg-blue-600 text-white border-blue-600'
-                          : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
-                      }`}
-                    >
-                      {cat}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-xs font-extrabold uppercase tracking-wider text-slate-500 mb-1.5">
-                Kita (laisvas laukas)
-              </label>
-              <input
-                type="text"
-                value={currentMaster.customCategory || ''}
-                onChange={(e) =>
-                  handleUpdateCurrentMasterField('customCategory', e.target.value)
-                }
-                placeholder="Pvz., Kondicionierių valymas, žaliuzių montavimas..."
-                className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-extrabold uppercase tracking-wider text-slate-500 mb-1.5">
-                Prisistatymas klientams
-              </label>
-              <textarea
-                rows={3}
-                value={currentMaster.bio}
-                onChange={(e) => handleUpdateCurrentMasterField('bio', e.target.value)}
-                className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm"
-              />
-            </div>
-
-            <label className="inline-flex items-center gap-2.5 text-sm font-bold text-slate-800 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={Boolean(currentMaster.certified)}
-                onChange={(e) =>
-                  handleUpdateCurrentMasterField('certified', e.target.checked)
-                }
-                className="w-4 h-4 rounded border-slate-300 text-blue-600"
-              />
-              <span>Turiu kvalifikaciją / sertifikuoto meistro žymą</span>
-            </label>
-
-            {/* Sąskaitos faktūros rekvizitai */}
-            <div className="pt-4 border-t border-slate-100 space-y-3">
-              <div>
-                <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-600">
-                  Sąskaitos faktūros rekvizitai
-                </h3>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Pagal šiuos rekvizitus automatiškai suformuojama ir išsiunčiama sąskaita faktūra
-                  pildant balansą.
-                </p>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-extrabold uppercase tracking-wider text-slate-500 mb-1.5">
-                    Įmonės pavadinimas arba vardas, pavardė
-                  </label>
-                  <input
-                    type="text"
-                    value={
-                      (currentMaster.invoiceDetails &&
-                        currentMaster.invoiceDetails.companyOrPersonName) ||
-                      ''
-                    }
-                    onChange={(e) =>
-                      handleUpdateCurrentMasterInvoiceField(
-                        'companyOrPersonName',
-                        e.target.value
-                      )
-                    }
-                    placeholder="Pvz., UAB / MB arba Vardas Pavardė (IV)"
-                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-extrabold uppercase tracking-wider text-slate-500 mb-1.5">
-                    Įmonės / IV kodas (arba PVM kodas)
-                  </label>
-                  <input
-                    type="text"
-                    value={
-                      (currentMaster.invoiceDetails && currentMaster.invoiceDetails.codeOrVat) ||
-                      ''
-                    }
-                    onChange={(e) =>
-                      handleUpdateCurrentMasterInvoiceField('codeOrVat', e.target.value)
-                    }
-                    placeholder="Pvz., 305123456 arba LT100012345619"
-                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-extrabold uppercase tracking-wider text-slate-500 mb-1.5">
-                    Buveinės / gyvenamasis adresas
-                  </label>
-                  <input
-                    type="text"
-                    value={
-                      (currentMaster.invoiceDetails && currentMaster.invoiceDetails.address) || ''
-                    }
-                    onChange={(e) =>
-                      handleUpdateCurrentMasterInvoiceField('address', e.target.value)
-                    }
-                    placeholder="Pvz., Konstitucijos pr. 12, Vilnius"
-                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-extrabold uppercase tracking-wider text-slate-500 mb-1.5">
-                    El. paštas sąskaitoms gauti
-                  </label>
-                  <input
-                    type="email"
-                    value={
-                      (currentMaster.invoiceDetails &&
-                        currentMaster.invoiceDetails.invoiceEmail) ||
-                      currentMaster.email ||
-                      ''
-                    }
-                    onChange={(e) =>
-                      handleUpdateCurrentMasterInvoiceField('invoiceEmail', e.target.value)
-                    }
-                    placeholder="saskaitos@pavyzdys.lt"
-                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm"
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div className="pt-2">
+            ) : (
               <button
-                type="submit"
-                className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-extrabold cursor-pointer"
+                type="button"
+                onClick={() => openRoleLoginModal('master')}
+                className="px-3.5 py-2 rounded-xl border border-blue-200 bg-blue-50 hover:bg-blue-100 text-xs font-extrabold text-blue-700 cursor-pointer"
               >
-                Išsaugoti profilį
+                Prisijungti
               </button>
-            </div>
-
-            {/* Paskyros ištrynimas pačiam meistrui */}
-            <div className="mt-6 pt-5 border-t border-red-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div>
-                <h3 className="text-xs font-extrabold uppercase tracking-wider text-red-700">
-                  Paskyros šalinimas
-                </h3>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Galite bet kada ištrinti savo meistro paskyrą ir pateiktus pasiūlymus.
-                </p>
-              </div>
-
-              {!confirmDeleteMasterAccount ? (
-                <button
-                  type="button"
-                  onClick={() => setConfirmDeleteMasterAccount(true)}
-                  className="px-4 py-2 rounded-xl border border-red-200 bg-red-50 hover:bg-red-100 text-red-700 text-xs font-extrabold transition cursor-pointer shrink-0"
-                >
-                  Ištrinti paskyrą
-                </button>
-              ) : (
-                <div className="flex items-center gap-2 shrink-0">
-                  <button
-                    type="button"
-                    onClick={handleDeleteOwnMasterAccount}
-                    className="px-4 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-extrabold transition cursor-pointer"
-                  >
-                    Patvirtinti ištrynimą
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setConfirmDeleteMasterAccount(false)}
-                    className="px-3 py-2 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold transition cursor-pointer"
-                  >
-                    Atšaukti
-                  </button>
-                </div>
-              )}
-            </div>
-          </form>
-        )}
-
-        {/* SKIRTUKAS: BALANSAS */}
-        {masterSubTab === 'balance' && (
-          <form
-            onSubmit={handleMasterTopUp}
-            className="bg-white rounded-2xl border border-slate-200 p-6 shadow-2xs space-y-5 max-w-xl"
-          >
-            <div>
-              <h2 className="text-base font-extrabold text-slate-900">Meistro balansas</h2>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Dabartinis balansas:{' '}
-                <strong className="text-emerald-600">
-                  {Number(currentMaster.balance).toFixed(2)} €
-                </strong>
-              </p>
-            </div>
-
-            <div>
-              <label className="block text-xs font-extrabold uppercase tracking-wider text-slate-500 mb-1.5">
-                Papildymo suma (€)
-              </label>
-              <input
-                type="number"
-                min="1"
-                step="1"
-                required
-                value={topUpAmount}
-                onChange={(e) => setTopUpAmount(e.target.value)}
-                className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-bold"
-              />
-            </div>
-
-            <label className="inline-flex items-center gap-2.5 text-sm font-bold text-slate-800 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={requestInvoiceChecked}
-                onChange={(e) => setRequestInvoiceChecked(e.target.checked)}
-                className="w-4 h-4 rounded border-slate-300 text-blue-600"
-              />
-              <span>
-                Gauti sąsk. faktūrą (automatiškai išrašoma ir išsiunčiama į paštą:{' '}
-                <span className="text-blue-700">
-                  {(currentMaster.invoiceDetails &&
-                    currentMaster.invoiceDetails.invoiceEmail) ||
-                    currentMaster.email ||
-                    'nenurodytas el. paštas'}
-                </span>
-                )
-              </span>
-            </label>
-
-            <button
-              type="submit"
-              className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-extrabold cursor-pointer"
-            >
-              Papildyti balansą
-            </button>
-          </form>
-        )}
-
-        {/* SKIRTUKAS: SĄSKAITOS */}
-        {masterSubTab === 'invoices' && (
-          <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-2xs space-y-4">
-            <h2 className="text-base font-extrabold text-slate-900">Operacijų ir sąskaitų istorija</h2>
-            <div className="divide-y divide-slate-100">
-              {transactions
-                .filter((t) => t.masterId === currentMaster.id)
-                .map((tx) => (
-                  <div
-                    key={tx.id}
-                    className="py-3 flex items-center justify-between gap-4 text-xs sm:text-sm"
-                  >
-                    <div>
-                      <span className="font-bold text-slate-900">{tx.type}</span>
-                      {tx.invoiceRequested && (
-                        <span className="ml-2 px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 text-[11px] font-bold">
-                          ✓ Sąsk. faktūra {tx.invoiceNumber ? `${tx.invoiceNumber} ` : ''}išsiųsta į{' '}
-                          {tx.invoiceSentTo ||
-                            (currentMaster.invoiceDetails &&
-                              currentMaster.invoiceDetails.invoiceEmail) ||
-                            currentMaster.email ||
-                            'paštą'}
-                        </span>
-                      )}
-                      <div className="text-xs text-slate-400">{tx.date}</div>
-                    </div>
-                    <span
-                      className={`font-extrabold ${
-                        Number(tx.amount) >= 0 ? 'text-emerald-600' : 'text-slate-900'
-                      }`}
-                    >
-                      {Number(tx.amount) >= 0 ? '+' : ''}
-                      {Number(tx.amount).toFixed(2)} €
-                    </span>
-                  </div>
-                ))}
-            </div>
+            )}
           </div>
-        )}
-
-        {/* SKIRTUKAS: PAGALBA (SUSISIEKTI SU ADMIN) */}
-        {masterSubTab === 'support' && (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-            <form
-              onSubmit={handleSendMessageToAdmin}
-              className="lg:col-span-6 bg-white rounded-2xl border border-slate-200 p-6 shadow-2xs space-y-4 h-fit"
-            >
-              <div>
-                <h2 className="text-base font-extrabold text-slate-900">Pagalba meistrui</h2>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Turite klausimų dėl paskyros patvirtinimo, balanso, sąskaitų ar užsakymų?
-                  Parašykite administratoriui – atsakymą matysite čia.
-                </p>
-              </div>
-
-              <div>
-                <label className="block text-xs font-extrabold uppercase tracking-wider text-slate-500 mb-1.5">
-                  Tema
-                </label>
-                <select
-                  value={adminSupportForm.topic}
-                  onChange={(e) =>
-                    setAdminSupportForm((prev) => ({ ...prev, topic: e.target.value }))
-                  }
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-semibold text-slate-900"
-                >
-                  <option value="Balansas / Sąskaita faktūra">Balansas / Sąskaita faktūra</option>
-                  <option value="Paskyros patvirtinimas / Sritys">
-                    Paskyros patvirtinimas / Sritys
-                  </option>
-                  <option value="Užsakymai ir pasiūlymai">Užsakymai ir pasiūlymai</option>
-                  <option value="Kitas klausimas">Kitas klausimas</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-extrabold uppercase tracking-wider text-slate-500 mb-1.5">
-                  Žinutė administratoriui *
-                </label>
-                <textarea
-                  rows={4}
-                  required
-                  value={adminSupportForm.message}
-                  onChange={(e) =>
-                    setAdminSupportForm((prev) => ({ ...prev, message: e.target.value }))
-                  }
-                  placeholder="Aprašykite savo klausimą arba situaciją..."
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm"
-                />
-              </div>
-
-              <button
-                type="submit"
-                className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-extrabold cursor-pointer"
-              >
-                Siųsti žinutę administratoriui
-              </button>
-            </form>
-
-            <div className="lg:col-span-6 bg-white rounded-2xl border border-slate-200 p-6 shadow-2xs space-y-4 h-fit">
-              <h2 className="text-base font-extrabold text-slate-900">
-                Susirašinėjimas su administratoriumi
-              </h2>
-
-              {supportMessages.filter(
-                (msg) => msg.senderRole === 'Meistras' && msg.senderId === currentMaster.id
-              ).length === 0 ? (
-                <p className="text-xs text-slate-500">
-                  Dar neišsiuntėte jokių žinučių administratoriui.
-                </p>
-              ) : (
-                <div className="space-y-3">
-                  {supportMessages
-                    .filter(
-                      (msg) => msg.senderRole === 'Meistras' && msg.senderId === currentMaster.id
-                    )
-                    .map((msg) => (
-                      <div
-                        key={msg.id}
-                        className="rounded-2xl bg-slate-50 border border-slate-200/80 p-4 space-y-2 text-xs"
-                      >
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="font-extrabold text-slate-900 text-sm">
-                            {msg.topic}
-                          </span>
-                          <span
-                            className={`px-2 py-0.5 rounded-full font-bold text-[11px] ${
-                              msg.adminReply
-                                ? 'bg-emerald-100 text-emerald-800'
-                                : 'bg-blue-50 text-blue-700'
-                            }`}
-                          >
-                            {msg.adminReply ? '✓ Admin atsakė' : 'Išsiųsta admin'}
-                          </span>
-                        </div>
-                        <p className="text-slate-700 leading-relaxed">{msg.message}</p>
-                        <div className="text-[11px] text-slate-400">{msg.sentAt}</div>
-
-                        {msg.adminReply && (
-                          <div className="mt-2 rounded-xl bg-emerald-50 border border-emerald-200 p-3 space-y-1">
-                            <div className="font-extrabold text-emerald-900">
-                              Administratoriaus atsakymas ({msg.repliedAt}):
-                            </div>
-                            <p className="text-emerald-950 leading-relaxed">{msg.adminReply}</p>
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* ATSKIRA SKILTIS: UŽSAKYMAI MEISTRUI */}
-        {masterSubTab === 'orders' && (() => {
-          const hiddenIds = hiddenJobIdsByMaster[currentMaster.id] || [];
-          const visibleJobsForMaster = jobs.filter((j) => !hiddenIds.includes(j.id));
-
-          return (
-            <div className="space-y-4">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <h2 className="text-lg font-black text-slate-900">
-                  Užsakymai ({visibleJobsForMaster.length})
-                </h2>
-                <div className="flex items-center gap-3">
-                  {hiddenIds.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={handleRestoreHiddenJobsForMaster}
-                      className="text-xs font-bold text-blue-600 hover:underline cursor-pointer"
-                    >
-                      Rodyti paslėptus ({hiddenIds.length})
-                    </button>
-                  )}
-                  <span className="text-xs text-slate-500">
-                    Paspauskite ant užsakymo, kad matytumėte pilną informaciją
-                  </span>
-                </div>
-              </div>
-
-              {visibleJobsForMaster.length === 0 ? (
-                <div className="bg-white rounded-2xl border border-slate-200 p-6 text-center space-y-2">
-                  <p className="text-sm font-bold text-slate-800">
-                    Šiuo metu jūsų sąraše nėra rodomų užsakymų.
-                  </p>
-                  {hiddenIds.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={handleRestoreHiddenJobsForMaster}
-                      className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-extrabold cursor-pointer"
-                    >
-                      Atkurti paslėptus užsakymus ({hiddenIds.length})
-                    </button>
-                  )}
-                </div>
-              ) : (
-                visibleJobsForMaster.map((job) => {
-                  const draft = offerDrafts[job.id] || {
-                    price: '40',
-                    eta: 'Šiandien',
-                    note: ''
-                  };
-                  const alreadyOffered = job.offers.some((o) => o.masterId === currentMaster.id);
-                  const isConfirmedForCurrentMaster =
-                    job.status === 'pasirinktas_meistras' &&
-                    job.selectedMasterId === currentMaster.id;
-                  const isSelectedCard = selectedMasterJobId === job.id;
-
-                  return (
-                    <div
-                      key={job.id}
-                      onClick={() => setSelectedMasterJobId(job.id)}
-                      className={`bg-white rounded-2xl border p-5 shadow-2xs space-y-4 transition cursor-pointer ${
-                        isSelectedCard
-                          ? 'border-blue-600 ring-2 ring-blue-100'
-                          : isConfirmedForCurrentMaster
-                          ? 'border-emerald-300 bg-emerald-50/20'
-                          : 'border-slate-200 hover:border-blue-300'
-                      }`}
-                    >
-                      <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="px-2.5 py-0.5 rounded-lg bg-blue-50 text-blue-700 font-bold">
-                            {job.category === 'Kita' && job.customCategoryText
-                              ? `Kita: ${job.customCategoryText}`
-                              : job.category}
-                          </span>
-                          <span className="font-semibold text-slate-700">📍 {job.city}</span>
-                          <span className="text-slate-500">• {job.preferredTime}</span>
-                          {isConfirmedForCurrentMaster && (
-                            <span className="px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-extrabold">
-                              ✓ Klientas patvirtino jus
-                            </span>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-3">
-                          <span className="text-slate-400">{job.createdAt}</span>
-                          <button
-                            type="button"
-                            onClick={(e) => handleHideJobForMaster(e, job.id)}
-                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-slate-200 hover:border-red-200 hover:bg-red-50 hover:text-red-600 text-slate-600 font-bold transition cursor-pointer"
-                            title="Pašalinti neįdomų užsakymą iš savo sąrašo"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                            <span>Paslėpti</span>
-                          </button>
-                        </div>
-                      </div>
-
-                      <div>
-                        <div className="flex items-start justify-between gap-3">
-                          <h3 className="font-extrabold text-slate-900 text-base">{job.title}</h3>
-                          <span className="text-xs font-bold text-blue-600 shrink-0">
-                            Atidaryti užsakymą →
-                          </span>
-                        </div>
-                        <p className="text-xs text-slate-600 mt-1 leading-relaxed">{job.description}</p>
-                      </div>
-
-                      {isConfirmedForCurrentMaster && (
-                        <div className="rounded-xl bg-emerald-50 border border-emerald-200 p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
-                          <div>
-                            <span className="font-extrabold uppercase tracking-wider text-emerald-800 block">
-                              Patvirtintas kliento kontaktas
-                            </span>
-                            <span className="font-bold text-slate-900 text-sm">
-                              {job.clientName || 'Klientas'} •{' '}
-                              <a
-                                href={`tel:${job.clientPhone.replace(/\s+/g, '')}`}
-                                onClick={(e) => e.stopPropagation()}
-                                className="text-emerald-700 underline font-extrabold"
-                              >
-                                {job.clientPhone}
-                              </a>
-                            </span>
-                          </div>
-                          <a
-                            href={`tel:${job.clientPhone.replace(/\s+/g, '')}`}
-                            onClick={(e) => e.stopPropagation()}
-                            className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs text-center"
-                          >
-                            Skambinti klientui
-                          </a>
-                        </div>
-                      )}
-
-                      {job.status === 'laukiama_pasiulymu' ? (
-                        alreadyOffered ? (
-                          <div className="text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-xl px-3.5 py-2.5">
-                            ✓ Jūs jau pateikėte pasiūlymą šiam užsakymui.
-                          </div>
-                        ) : (
-                          <form
-                            onClick={(e) => e.stopPropagation()}
-                            onSubmit={(e) => handleSubmitMasterOffer(e, job.id)}
-                            className="grid grid-cols-1 sm:grid-cols-12 gap-2.5 pt-2 border-t border-slate-100"
-                          >
-                            <div className="sm:col-span-3">
-                              <input
-                                type="number"
-                                min="1"
-                                step="1"
-                                required
-                                value={draft.price}
-                                onChange={(e) =>
-                                  setOfferDrafts((prev) => ({
-                                    ...prev,
-                                    [job.id]: { ...draft, price: e.target.value }
-                                  }))
-                                }
-                                placeholder="Kaina (€)"
-                                className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-bold"
-                              />
-                            </div>
-                            <div className="sm:col-span-4">
-                              <input
-                                type="text"
-                                required
-                                value={draft.eta}
-                                onChange={(e) =>
-                                  setOfferDrafts((prev) => ({
-                                    ...prev,
-                                    [job.id]: { ...draft, eta: e.target.value }
-                                  }))
-                                }
-                                placeholder="Kada atvyksite?"
-                                className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs"
-                              />
-                            </div>
-                            <div className="sm:col-span-5 flex gap-2">
-                              <input
-                                type="text"
-                                value={draft.note}
-                                onChange={(e) =>
-                                  setOfferDrafts((prev) => ({
-                                    ...prev,
-                                    [job.id]: { ...draft, note: e.target.value }
-                                  }))
-                                }
-                                placeholder="Trumpas komentaras..."
-                                className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs"
-                              />
-                              <button
-                                type="submit"
-                                className="px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shrink-0 cursor-pointer"
-                              >
-                                Siųsti
-                              </button>
-                            </div>
-                          </form>
-                        )
-                      ) : (
-                        !isConfirmedForCurrentMaster && (
-                          <div className="text-xs font-bold text-slate-500 bg-slate-50 rounded-xl px-3.5 py-2">
-                            Šiam užsakymui jau pasirinktas kitas meistras.
-                          </div>
-                        )
-                      )}
-                    </div>
-                  );
-                })
-              )}
-            </div>
-          );
-        })()}
-      </div>
-    );
-  };
-
-  // ==========================================================================
-  // ADMINISTRATORIAUS PUSLAPIS ('admin') – MEISTRAI, BALANSAS, UŽKLAUSOS, KATEGORIJOS
-  // ==========================================================================
-
-  const renderAdminView = () => (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8 space-y-6">
-      <div className="bg-white rounded-2xl border border-slate-200 p-5 sm:p-6 shadow-2xs flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <span className="text-[11px] font-extrabold uppercase tracking-wider text-amber-600">
-            Administratoriaus valdymas
-          </span>
-          <h1 className="text-xl sm:text-2xl font-black text-slate-900">
-            namupagalba.lt – Admin panelė
-          </h1>
         </div>
-
         <div className="flex items-center gap-2 flex-wrap">
           {[
             {
@@ -3587,611 +3063,18 @@ export default function App() {
               )}
             </button>
           ))}
+
+          {isAdminLoggedIn && (
+            <button
+              type="button"
+              onClick={() => handleLogoutRole('admin')}
+              className="px-3.5 py-2.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-xs font-bold text-slate-700 cursor-pointer"
+            >
+              Atsijungti
+            </button>
+          )}
         </div>
       </div>
-
-      {/* ADMIN SKIRTUKAS: ŽINUTĖS / PAGALBA */}
-      {adminSubTab === 'messages' && (
-        <div className="space-y-4">
-          <div className="bg-white rounded-2xl border border-slate-200 p-5 sm:px-6 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-            <div>
-              <h2 className="text-base font-extrabold text-slate-900">
-                Pagalbos žinutės nuo klientų, meistrų ir lankytojų ({supportMessages.length})
-              </h2>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Klientams ir meistrams atsakymas keliauja tiesiai į jų paskyros skiltį „Pagalba“, o
-                lankytojams iš pagrindinio puslapio – el. paštu.
-              </p>
-            </div>
-          </div>
-
-          {supportMessages.length === 0 ? (
-            <div className="bg-white rounded-2xl border border-slate-200 p-8 text-center text-xs text-slate-500">
-              Gautų žinučių nėra.
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {supportMessages.map((msg) => (
-                <div
-                  key={msg.id}
-                  className={`bg-white rounded-2xl border p-5 sm:p-6 shadow-2xs space-y-3 ${
-                    !msg.isReadByAdmin ? 'border-amber-300 bg-amber-50/15' : 'border-slate-200'
-                  }`}
-                >
-                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span
-                        className={`px-2.5 py-0.5 rounded-full font-extrabold ${
-                          msg.senderRole === 'Meistras'
-                            ? 'bg-blue-100 text-blue-800'
-                            : msg.senderRole === 'Klientas'
-                            ? 'bg-emerald-100 text-emerald-800'
-                            : 'bg-purple-100 text-purple-800'
-                        }`}
-                      >
-                        {msg.senderRole}
-                      </span>
-                      <span className="font-extrabold text-slate-900 text-sm">
-                        {msg.senderName}
-                      </span>
-                      <span className="text-slate-500">({msg.senderContact})</span>
-                      <span className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 font-bold">
-                        {msg.topic}
-                      </span>
-                    </div>
-
-                    <div className="flex items-center gap-3">
-                      <span className="text-slate-400">{msg.sentAt}</span>
-                      <button
-                        type="button"
-                        onClick={() => handleAdminDeleteSupportMessage(msg.id)}
-                        className="text-red-600 hover:underline font-bold cursor-pointer"
-                      >
-                        Ištrinti
-                      </button>
-                    </div>
-                  </div>
-
-                  <p className="text-sm text-slate-800 leading-relaxed bg-slate-50 rounded-xl p-3.5 border border-slate-200/70">
-                    {msg.message}
-                  </p>
-
-                  {msg.adminReply && (
-                    <div className="rounded-xl bg-emerald-50 border border-emerald-200 p-3.5 text-xs space-y-1">
-                      <div className="font-extrabold text-emerald-900">
-                        ✓ Išsiųstas atsakymas ({msg.deliveryMethod}) • {msg.repliedAt}:
-                      </div>
-                      <p className="text-emerald-950 text-sm">{msg.adminReply}</p>
-                    </div>
-                  )}
-
-                  <form
-                    onSubmit={(e) => handleAdminReplyToSupport(e, msg.id)}
-                    className="flex flex-col sm:flex-row gap-2 pt-1"
-                  >
-                    <input
-                      type="text"
-                      value={adminReplyDrafts[msg.id] || ''}
-                      onChange={(e) =>
-                        setAdminReplyDrafts((prev) => ({
-                          ...prev,
-                          [msg.id]: e.target.value
-                        }))
-                      }
-                      placeholder={
-                        msg.senderRole === 'Lankytojas'
-                          ? `Rašyti atsakymą el. paštu (${msg.senderContact})...`
-                          : `Rašyti atsakymą į ${msg.senderRole.toLowerCase()} paskyrą...`
-                      }
-                      className="flex-1 px-3.5 py-2.5 rounded-xl border border-slate-300 text-xs sm:text-sm"
-                    />
-                    <button
-                      type="submit"
-                      className="px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-extrabold cursor-pointer shrink-0"
-                    >
-                      {msg.senderRole === 'Lankytojas'
-                        ? 'Atrašyti el. paštu'
-                        : 'Atrašyti į paskyrą'}
-                    </button>
-                  </form>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ADMIN SKIRTUKAS: BALANSAS IR STATISTIKA */}
-      {adminSubTab === 'balance' && (
-        <div className="space-y-6">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-2xs">
-              <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400">
-                Kiek iš viso turi meistrai balanse
-              </span>
-              <p className="text-2xl font-black text-blue-600 mt-1.5">
-                {totalPlatformBalance.toFixed(2)} €
-              </p>
-              <p className="text-[11px] text-slate-500 mt-1">
-                Visų meistrų balansų suma kartu ({masters.length} meistrai)
-              </p>
-            </div>
-
-            <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-2xs">
-              <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400">
-                Kiek jau uždirbta
-              </span>
-              <p className="text-2xl font-black text-emerald-600 mt-1.5">
-                {totalEarnedRevenue.toFixed(2)} €
-              </p>
-              <p className="text-[11px] text-slate-500 mt-1">
-                Tik meistrų papildymai (startiniai 6 € neskaičiuojami)
-              </p>
-            </div>
-
-            <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-2xs">
-              <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400">
-                Viso klientų apsilankė
-              </span>
-              <p className="text-2xl font-black text-slate-900 mt-1.5">
-                {128 + jobs.length * 4}
-              </p>
-              <p className="text-[11px] text-slate-500 mt-1">Bendras klientų apsilankymų skaičius</p>
-            </div>
-
-            <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-2xs">
-              <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400">
-                Užklausų per dieną
-              </span>
-              <p className="text-2xl font-black text-blue-600 mt-1.5">{jobs.length}</p>
-              <p className="text-[11px] text-slate-500 mt-1">Paskelbtos užklausos šiandien</p>
-            </div>
-
-            <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-2xs">
-              <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400">
-                Naujų klientų
-              </span>
-              <p className="text-2xl font-black text-slate-900 mt-1.5">
-                {14 + Math.max(0, jobs.length - 3)}
-              </p>
-              <p className="text-[11px] text-slate-500 mt-1">Nauji klientai šiandien</p>
-            </div>
-
-            <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-2xs">
-              <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400">
-                Naujų meistrų
-              </span>
-              <p className="text-2xl font-black text-amber-600 mt-1.5">{masters.length}</p>
-              <p className="text-[11px] text-slate-500 mt-1">
-                Viso registruota ({pendingApprovalMasters.length} laukia)
-              </p>
-            </div>
-          </div>
-
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-2xs overflow-hidden">
-            <div className="px-6 py-4 border-b border-slate-100">
-              <h2 className="text-base font-extrabold text-slate-900">
-                Paskutinės balanso operacijos
-              </h2>
-            </div>
-            <div className="divide-y divide-slate-100">
-              {transactions.map((tx) => (
-                <div
-                  key={tx.id}
-                  className="px-6 py-3.5 flex items-center justify-between gap-4 text-sm"
-                >
-                  <div>
-                    <span className="font-bold text-slate-900">{tx.masterName}</span>
-                    <span className="text-xs text-slate-500 ml-2">• {tx.type}</span>
-                  </div>
-                  <div className="flex items-center gap-4">
-                    <span className="text-xs text-slate-400">{tx.date}</span>
-                    <span
-                      className={`font-extrabold ${
-                        Number(tx.amount) >= 0 ? 'text-emerald-600' : 'text-slate-900'
-                      }`}
-                    >
-                      {Number(tx.amount) >= 0 ? '+' : ''}
-                      {Number(tx.amount).toFixed(2)} €
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ADMIN SKIRTUKAS: MEISTRAI */}
-      {adminSubTab === 'masters' && (
-        <div className="space-y-6">
-          {pendingApprovalMasters.length > 0 && (
-            <div className="bg-white rounded-2xl border border-amber-300 shadow-2xs overflow-hidden">
-              <div className="px-6 py-4 bg-amber-50 border-b border-amber-200">
-                <h2 className="text-base font-extrabold text-slate-900">
-                  Nauji meistrai po SMS patvirtinimo, laukiantys patvirtinimo (
-                  {pendingApprovalMasters.length})
-                </h2>
-              </div>
-              <div className="divide-y divide-slate-100">
-                {pendingApprovalMasters.map((m) => (
-                  <div
-                    key={m.id}
-                    className="p-5 sm:px-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
-                  >
-                    <div>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSelectedAdminMasterId(m.id);
-                          setAdminBalanceAdjustInput('15');
-                        }}
-                        className="font-extrabold text-slate-900 hover:text-blue-600 underline text-left cursor-pointer"
-                      >
-                        {m.name}
-                      </button>
-                      <p className="text-xs text-slate-600 mt-0.5">
-                        📍 {m.city} • {m.phone} • Sritys: {m.categories.join(', ')}
-                      </p>
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => handleApproveMaster(m.id)}
-                        className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold cursor-pointer"
-                      >
-                        ✓ Patvirtinti
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteMaster(m.id)}
-                        className="px-3.5 py-2 rounded-xl border border-red-200 text-red-600 hover:bg-red-50 text-xs font-bold cursor-pointer"
-                      >
-                        Šalinti
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-2xs overflow-hidden">
-            <div className="p-5 sm:px-6 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div>
-                <h2 className="text-base font-extrabold text-slate-900">
-                  Visi meistrai ({filteredMastersForAdmin.length})
-                </h2>
-                <p className="text-xs text-slate-500">
-                  Paspauskite ant meistro, kad atidarytumėte profilį, valdytumėte balansą,
-                  blokavimą, šalinimą ar atsiliepimus.
-                </p>
-              </div>
-              <input
-                type="text"
-                value={adminMasterSearch}
-                onChange={(e) => setAdminMasterSearch(e.target.value)}
-                placeholder="Ieškoti meistro..."
-                className="px-3.5 py-2 rounded-xl border border-slate-300 text-xs sm:text-sm w-full sm:w-64"
-              />
-            </div>
-
-            <div className="divide-y divide-slate-100">
-              {filteredMastersForAdmin.map((m) => (
-                <div
-                  key={m.id}
-                  onClick={() => {
-                    setSelectedAdminMasterId(m.id);
-                    setAdminBalanceAdjustInput('15');
-                  }}
-                  className="p-5 sm:px-6 hover:bg-slate-50 flex flex-col sm:flex-row sm:items-center justify-between gap-3 cursor-pointer transition"
-                >
-                  <div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-extrabold text-sm text-slate-900">{m.name}</span>
-                      <span className="text-xs text-slate-500">• {m.city}</span>
-                      <span
-                        className={`px-2 py-0.5 rounded-full text-[11px] font-bold ${
-                          m.status === 'patvirtintas'
-                            ? 'bg-emerald-100 text-emerald-800'
-                            : m.status === 'uzblokuotas'
-                            ? 'bg-red-100 text-red-700'
-                            : 'bg-amber-100 text-amber-900'
-                        }`}
-                      >
-                        {m.status === 'patvirtintas'
-                          ? 'Patvirtintas'
-                          : m.status === 'uzblokuotas'
-                          ? 'Užblokuotas'
-                          : 'Laukia patvirtinimo'}
-                      </span>
-                    </div>
-                    <p className="text-xs text-slate-500 mt-0.5">
-                      {m.phone} • Atsiliepimų: {m.reviews.length} (★ {m.rating.toFixed(1)})
-                    </p>
-                  </div>
-
-                  <div className="flex items-center gap-4">
-                    <span className="text-sm font-black text-emerald-600">
-                      {Number(m.balance).toFixed(2)} €
-                    </span>
-                    <span className="text-xs font-bold text-blue-600">Valdyti →</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ADMIN SKIRTUKAS: SKELBIMAI */}
-      {adminSubTab === 'jobs' && (
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-2xs divide-y divide-slate-100">
-          {jobs.map((j) => (
-            <div
-              key={j.id}
-              className="p-5 sm:px-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
-            >
-              <div>
-                <div className="flex items-center gap-2 text-xs">
-                  <span className="px-2.5 py-0.5 rounded-lg bg-blue-50 text-blue-700 font-bold">
-                    {j.category === 'Kita' && j.customCategoryText
-                      ? `Kita: ${j.customCategoryText}`
-                      : j.category}
-                  </span>
-                  <span className="font-semibold text-slate-600">📍 {j.city}</span>
-                  <span className="text-slate-400">• {j.createdAt}</span>
-                </div>
-                <h3 className="font-extrabold text-sm text-slate-900 mt-1">{j.title}</h3>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Klientas: {j.clientName || 'Klientas'} ({j.clientPhone}) • Pasiūlymų:{' '}
-                  {j.offers.length}
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => handleAdminDeleteJob(j.id)}
-                className="px-3.5 py-2 rounded-xl border border-red-200 text-red-600 hover:bg-red-50 text-xs font-bold shrink-0 cursor-pointer"
-              >
-                Šalinti skelbimą
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* ADMIN SKIRTUKAS: KATEGORIJOS */}
-      {adminSubTab === 'categories' && (
-        <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-2xs space-y-5 max-w-2xl">
-          <h2 className="text-base font-extrabold text-slate-900">Paslaugų kategorijų valdymas</h2>
-          <form onSubmit={handleAdminAddCategory} className="flex gap-2">
-            <input
-              type="text"
-              value={newCategoryName}
-              onChange={(e) => setNewCategoryName(e.target.value)}
-              placeholder="Naujos kategorijos pavadinimas..."
-              className="flex-1 px-3.5 py-2 rounded-xl border border-slate-300 text-sm"
-            />
-            <button
-              type="submit"
-              className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-extrabold cursor-pointer"
-            >
-              + Pridėti
-            </button>
-          </form>
-          <div className="flex flex-wrap gap-2">
-            {categories.map((cat) => (
-              <span
-                key={cat}
-                className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-100 text-slate-800 text-xs font-bold"
-              >
-                <span>{cat}</span>
-                <button
-                  type="button"
-                  onClick={() => handleAdminRemoveCategory(cat)}
-                  className="text-slate-400 hover:text-red-600 cursor-pointer"
-                >
-                  ×
-                </button>
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-
-  // ==========================================================================
-  // MODALAI (BDAR/TEISINIAI DOKUMENTAI, UŽSAKYMAS, PROFILIAI, ADMIN, SMS)
-  // ==========================================================================
-
-  const renderModals = () => (
-    <>
-      {/* MODALAS: BDAR / PRIVATUMO POLITIKA / TAISYKLĖS / SLAPUKAI */}
-      {activeLegalDoc && LEGAL_DOCS[activeLegalDoc] && (
-        <div
-          onClick={() => setActiveLegalDoc(null)}
-          className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-2xs flex items-center justify-center p-4"
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            className="bg-white rounded-3xl border border-slate-200 shadow-2xl w-full max-w-2xl max-h-[88vh] overflow-y-auto p-6 sm:p-8 space-y-5"
-          >
-            <div className="flex items-start justify-between gap-3 border-b border-slate-100 pb-4">
-              <div>
-                <span className="text-[11px] font-extrabold uppercase tracking-wider text-blue-600">
-                  Teisinis dokumentas • {LEGAL_DOCS[activeLegalDoc].updated}
-                </span>
-                <h3 className="text-xl font-black text-slate-900 mt-0.5">
-                  {LEGAL_DOCS[activeLegalDoc].title}
-                </h3>
-              </div>
-              <button
-                type="button"
-                onClick={() => setActiveLegalDoc(null)}
-                className="p-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="space-y-4">
-              {LEGAL_DOCS[activeLegalDoc].sections.map((sec) => (
-                <div key={sec.heading} className="space-y-1">
-                  <h4 className="text-sm font-extrabold text-slate-900">{sec.heading}</h4>
-                  <p className="text-xs sm:text-sm text-slate-600 leading-relaxed">{sec.body}</p>
-                </div>
-              ))}
-            </div>
-
-            <div className="pt-3 border-t border-slate-100 flex justify-end">
-              <button
-                type="button"
-                onClick={() => setActiveLegalDoc(null)}
-                className="px-5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-extrabold cursor-pointer"
-              >
-                Supratau, uždaryti
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* MODALAS: PILNAS UŽSAKYMAS MEISTRUI */}
-      {selectedMasterJob && currentMaster && (
-        <div
-          onClick={() => setSelectedMasterJobId(null)}
-          className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-2xs flex items-center justify-center p-4"
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            className="bg-white rounded-3xl border border-slate-200 shadow-2xl w-full max-w-xl max-h-[90vh] overflow-y-auto p-6 space-y-5"
-          >
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <div className="flex flex-wrap items-center gap-2 text-xs">
-                  <span className="px-2.5 py-0.5 rounded-lg bg-blue-50 text-blue-700 font-bold">
-                    {selectedMasterJob.category === 'Kita' && selectedMasterJob.customCategoryText
-                      ? `Kita: ${selectedMasterJob.customCategoryText}`
-                      : selectedMasterJob.category}
-                  </span>
-                  <span className="font-semibold text-slate-600">
-                    📍 {selectedMasterJob.city}
-                    {selectedMasterJob.district ? `, ${selectedMasterJob.district}` : ''}
-                  </span>
-                  <span className="text-slate-400">• {selectedMasterJob.createdAt}</span>
-                </div>
-                <h3 className="text-lg font-extrabold text-slate-900 mt-1.5">
-                  {selectedMasterJob.title}
-                </h3>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => setSelectedMasterJobId(null)}
-                className="p-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="space-y-3 text-xs text-slate-700 bg-slate-50 p-4 rounded-2xl border border-slate-200/80">
-              <div>
-                <span className="font-extrabold uppercase tracking-wider text-slate-400 block">
-                  Pageidaujamas atvykimo laikas
-                </span>
-                <span className="font-bold text-slate-900 text-sm">
-                  {selectedMasterJob.preferredTime}
-                </span>
-              </div>
-
-              <div>
-                <span className="font-extrabold uppercase tracking-wider text-slate-400 block">
-                  Pilnas darbo aprašymas
-                </span>
-                <p className="text-sm text-slate-700 leading-relaxed mt-0.5">
-                  {selectedMasterJob.description}
-                </p>
-              </div>
-            </div>
-
-            {selectedMasterJob.photo1Url && (
-              <div className="space-y-1.5">
-                <span className="text-xs font-extrabold uppercase tracking-wider text-slate-400 block">
-                  Pridėta nuotrauka
-                </span>
-                <img
-                  src={selectedMasterJob.photo1Url}
-                  alt={selectedMasterJob.photo1Name || 'Užsakymo nuotrauka'}
-                  className="w-full max-h-56 object-cover rounded-2xl border border-slate-200"
-                />
-              </div>
-            )}
-
-            {selectedMasterJob.status === 'pasirinktas_meistras' &&
-            selectedMasterJob.selectedMasterId === currentMaster.id ? (
-              <div className="rounded-2xl bg-emerald-50 border border-emerald-200 p-4 space-y-3">
-                <span className="text-xs font-extrabold uppercase tracking-wider text-emerald-800 block">
-                  ✓ Klientas patvirtino jus – galite skambinti tiesiogiai
-                </span>
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white rounded-xl p-3.5 border border-emerald-200/80">
-                  <div className="space-y-0.5">
-                    <p className="text-xs text-slate-500 font-semibold">Kliento vardas</p>
-                    <p className="text-sm font-extrabold text-slate-900">
-                      {selectedMasterJob.clientName || 'Klientas'}
-                    </p>
-                  </div>
-                  <div className="space-y-0.5">
-                    <p className="text-xs text-slate-500 font-semibold">Telefono numeris</p>
-                    <a
-                      href={`tel:${selectedMasterJob.clientPhone.replace(/\s+/g, '')}`}
-                      className="text-sm font-black text-emerald-700 underline"
-                    >
-                      {selectedMasterJob.clientPhone}
-                    </a>
-                  </div>
-                  <a
-                    href={`tel:${selectedMasterJob.clientPhone.replace(/\s+/g, '')}`}
-                    className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold text-center"
-                  >
-                    Paskambinti
-                  </a>
-                </div>
-              </div>
-            ) : (
-              <div className="rounded-2xl bg-amber-50 border border-amber-200 p-3.5 text-xs text-amber-900 font-semibold">
-                Kliento vardas ir telefono numeris atveriami iškart, kai klientas patvirtina jūsų
-                pasiūlymą šiam užsakymui.
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* MODALAS: MEISTRO KABINETE VISI ATSILIEPIMAI IR ĮVERTINIMAI */}
-      {masterReviewsModalOpen && currentMaster && (
-        <div
-          onClick={() => setMasterReviewsModalOpen(false)}
-          className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-2xs flex items-center justify-center p-4"
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            className="bg-white rounded-3xl border border-slate-200 shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-6 space-y-4"
-          >
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <h3 className="text-lg font-black text-slate-900">
-                  {currentMaster.name} – atsiliepimai ir įvertinimai
-                </h3>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Bendras įvertinimas:{' '}
-                  <strong className="text-amber-600">
-                    ★ {Number(currentMaster.rating || 5).toFixed(1)}
-                  </strong>{' '}
-                  • Viso atsiliepimų: <strong>{currentMaster.reviews.length}</strong>
-                </p>
-              </div>
               <button
                 type="button"
                 onClick={() => setMasterReviewsModalOpen(false)}
@@ -4540,222 +3423,222 @@ export default function App() {
 
       {/* MODALAS: TAPTI MEISTRU + SMS PATVIRTINIMO KODAS */}
       {becomeMasterOpen && (
+  // MODALAI (BDAR/TEISINIAI DOKUMENTAI, UŽSAKYMAS, PROFILIAI, ADMIN, SMS)
+  // ==========================================================================
+
+  const renderModals = () => (
+    <>
+      {/* PRISIJUNGIMO MODALAI: KLIENTAS / MEISTRAS / ADMIN */}
+      {loginModalRole && (
         <div
-          onClick={() => setBecomeMasterOpen(false)}
+          onClick={() => setLoginModalRole(null)}
           className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-2xs flex items-center justify-center p-4"
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="bg-white rounded-3xl border border-slate-200 shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-6 space-y-5"
+            className="bg-white rounded-3xl border border-slate-200 shadow-2xl w-full max-w-md p-6 space-y-5"
           >
             <div className="flex items-start justify-between gap-3">
               <div>
-                <span className="text-[11px] font-extrabold uppercase tracking-wider text-amber-600">
-                  Meistro registracija
+                <span className="text-[11px] font-extrabold uppercase tracking-wider text-blue-600">
+                  {loginModalRole === 'client'
+                    ? 'Kliento prisijungimas'
+                    : loginModalRole === 'master'
+                    ? 'Meistro kabineto prisijungimas'
+                    : 'Administratoriaus prisijungimas'}
                 </span>
-                <h3 className="text-lg font-black text-slate-900">
-                  {smsStep === 'form'
-                    ? 'Tapti meistru namupagalba.lt'
-                    : 'SMS kodo patvirtinimas'}
+                <h3 className="text-lg font-black text-slate-900 mt-0.5">
+                  {loginModalRole === 'client'
+                    ? 'Prisijungti kaip klientui'
+                    : loginModalRole === 'master'
+                    ? 'Prisijungti prie meistro kabineto'
+                    : 'Prisijungti prie admin panelės'}
                 </h3>
               </div>
               <button
                 type="button"
-                onClick={() => setBecomeMasterOpen(false)}
+                onClick={() => setLoginModalRole(null)}
                 className="p-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            {smsStep === 'form' ? (
-              <form onSubmit={handleRequestSmsCode} className="space-y-4">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">
-                      Vardas, pavardė *
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      value={masterRegForm.name}
-                      onChange={(e) =>
-                        setMasterRegForm((prev) => ({ ...prev, name: e.target.value }))
-                      }
-                      placeholder="Pvz., Jonas Jonaitis"
-                      className="w-full px-3 py-2 rounded-xl border border-slate-300 text-sm"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">
-                      Telefono numeris *
-                    </label>
+            {loginModalRole === 'client' && (
+              <form onSubmit={handleClientLoginSubmit} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Jūsų vardas
+                  </label>
+                  <input
+                    type="text"
+                    value={clientLoginForm.name}
+                    onChange={(e) =>
+                      setClientLoginForm((prev) => ({ ...prev, name: e.target.value }))
+                    }
+                    placeholder="Pvz., Greta"
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Telefono numeris *
+                  </label>
+                  <input
+                    type="tel"
+                    required
+                    value={clientLoginForm.phone}
+                    onChange={(e) =>
+                      setClientLoginForm((prev) => ({ ...prev, phone: e.target.value }))
+                    }
+                    placeholder="+370 6XX XXXXX"
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm"
+                  />
+                </div>
+                {clientLoginError && (
+                  <p className="text-xs font-bold text-red-600">{clientLoginError}</p>
+                )}
+                <button
+                  type="submit"
+                  className="w-full py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-sm cursor-pointer"
+                >
+                  Prisijungti kaip klientas
+                </button>
+              </form>
+            )}
+
+            {loginModalRole === 'master' && (
+              <form onSubmit={handleMasterLoginSubmit} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Meistro telefono numeris *
+                  </label>
+                  <div className="flex gap-2">
                     <input
                       type="tel"
                       required
-                      value={masterRegForm.phone}
-                      onChange={(e) =>
-                        setMasterRegForm((prev) => ({ ...prev, phone: e.target.value }))
-                      }
-                      placeholder="+370 6XX XXXXX"
-                      className="w-full px-3 py-2 rounded-xl border border-slate-300 text-sm"
+                      value={masterLoginInput}
+                      onChange={(e) => {
+                        setMasterLoginInput(e.target.value);
+                        setMasterLoginError('');
+                      }}
+                      placeholder="+370 612 34567"
+                      className="flex-1 px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-semibold"
                     />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">Miestas</label>
-                    <select
-                      value={masterRegForm.city}
-                      onChange={(e) =>
-                        setMasterRegForm((prev) => ({ ...prev, city: e.target.value }))
-                      }
-                      className="w-full px-3 py-2 rounded-xl border border-slate-300 text-sm font-semibold"
+                    <button
+                      type="button"
+                      onClick={handleSendMasterLoginCode}
+                      className="px-3.5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-extrabold shrink-0 cursor-pointer"
                     >
-                      {CITIES.map((city) => (
-                        <option key={city} value={city}>
-                          {city}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">
-                      El. paštas
-                    </label>
-                    <input
-                      type="email"
-                      value={masterRegForm.email}
-                      onChange={(e) =>
-                        setMasterRegForm((prev) => ({ ...prev, email: e.target.value }))
-                      }
-                      placeholder="meistras@pavyzdys.lt"
-                      className="w-full px-3 py-2 rounded-xl border border-slate-300 text-sm"
-                    />
+                      Gauti SMS kodą
+                    </button>
                   </div>
                 </div>
 
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                    Paslaugų sritys
-                  </label>
-                  <div className="flex flex-wrap gap-1.5">
-                    {categories.map((cat) => {
-                      const active = masterRegForm.categories.includes(cat);
-                      return (
-                        <button
-                          key={cat}
-                          type="button"
-                          onClick={() => toggleRegMasterCategory(cat)}
-                          className={`px-2.5 py-1 rounded-xl text-xs font-bold border cursor-pointer ${
-                            active
-                              ? 'bg-blue-600 text-white border-blue-600'
-                              : 'bg-white text-slate-700 border-slate-300'
-                          }`}
-                        >
-                          {cat}
-                        </button>
-                      );
-                    })}
+                {masterLoginSentCode && (
+                  <div className="rounded-xl bg-blue-50 border border-blue-200 p-3 text-xs text-blue-900">
+                    Testavimo SMS kodas: <strong>{masterLoginSentCode}</strong>
                   </div>
-                </div>
+                )}
 
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Prisistatymas
-                  </label>
-                  <textarea
-                    rows={2}
-                    value={masterRegForm.bio}
-                    onChange={(e) =>
-                      setMasterRegForm((prev) => ({ ...prev, bio: e.target.value }))
-                    }
-                    placeholder="Trumpai apie jūsų patirtį ir atliekamus darbus..."
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 text-sm"
-                  />
-                </div>
-
-                <label className="inline-flex items-center gap-2 text-xs font-bold text-slate-700 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={masterRegForm.certified}
-                    onChange={(e) =>
-                      setMasterRegForm((prev) => ({ ...prev, certified: e.target.checked }))
-                    }
-                  />
-                  <span>Turiu kvalifikaciją / sertifikuoto meistro žymą</span>
-                </label>
-
-                {smsError && <p className="text-xs font-bold text-red-600">{smsError}</p>}
-
-                <button
-                  type="submit"
-                  className="w-full py-3 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 font-extrabold text-sm cursor-pointer"
-                >
-                  Gauti SMS patvirtinimo kodą
-                </button>
-              </form>
-            ) : (
-              <form onSubmit={handleVerifySmsCode} className="space-y-4">
-                <div className="rounded-2xl bg-blue-50 border border-blue-200 p-4 text-xs text-blue-900 space-y-1">
-                  <p>
-                    Išsiuntėme SMS kodą į numerį <strong>{masterRegForm.phone}</strong>.
-                  </p>
-                  <p>
-                    Testavimo SMS kodas: <strong className="text-sm">{generatedSmsCode}</strong>
-                  </p>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Įveskite 4 skaitmenų SMS kodą
+                    SMS patvirtinimo kodas *
                   </label>
                   <input
                     type="text"
                     maxLength={4}
-                    required
-                    value={enteredSmsCode}
+                    value={masterLoginSmsCode}
                     onChange={(e) => {
-                      setEnteredSmsCode(e.target.value);
-                      setSmsError('');
+                      setMasterLoginSmsCode(e.target.value);
+                      setMasterLoginError('');
                     }}
-                    placeholder="1234"
-                    className="w-full px-4 py-2.5 rounded-xl border border-slate-300 text-center text-lg font-black tracking-widest"
+                    placeholder="4 skaitmenų kodas"
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-black tracking-widest"
                   />
                 </div>
 
-                {smsError && <p className="text-xs font-bold text-red-600">{smsError}</p>}
+                {masterLoginError && (
+                  <p className="text-xs font-bold text-red-600">{masterLoginError}</p>
+                )}
 
                 <button
                   type="submit"
-                  className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-sm cursor-pointer"
+                  className="w-full py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-sm cursor-pointer"
                 >
-                  Patvirtinti SMS kodą
+                  Prisijungti į meistro kabinetą
                 </button>
 
-                <div className="flex items-center justify-between text-xs pt-1">
+                <div className="flex items-center justify-between text-xs pt-1 border-t border-slate-100">
                   <button
                     type="button"
                     onClick={() => {
-                      const nextCode = String(Math.floor(1000 + Math.random() * 9000));
-                      setGeneratedSmsCode(nextCode);
-                      setSmsError('');
-                      notify(`Naujas SMS kodas išsiųstas į ${masterRegForm.phone}`);
+                      setIsMasterLoggedIn(true);
+                      setLoginModalRole(null);
+                      setActiveView('master');
+                      notify(`Prisijungta prie meistro kabineto (${currentMaster?.name || 'Meistras'}).`);
                     }}
-                    className="font-bold text-blue-600 hover:underline cursor-pointer"
-                  >
-                    Siųsti kodą dar kartą
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={completeMasterRegistration}
                     className="font-bold text-slate-600 hover:text-slate-900 underline cursor-pointer"
                   >
-                    Greitas patvirtinimas (testui)
+                    Greitas prisijungimas (testui)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setLoginModalRole(null);
+                      openBecomeMasterModal();
+                    }}
+                    className="font-extrabold text-amber-600 hover:underline cursor-pointer"
+                  >
+                    Neturi paskyros? Tapti meistru →
                   </button>
                 </div>
+              </form>
+            )}
+
+            {loginModalRole === 'admin' && (
+              <form onSubmit={handleAdminLoginSubmit} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Administratoriaus el. paštas *
+                  </label>
+                  <input
+                    type="email"
+                    required
+                    value={adminLoginForm.email}
+                    onChange={(e) => {
+                      setAdminLoginForm((prev) => ({ ...prev, email: e.target.value }));
+                      setAdminLoginError('');
+                    }}
+                    placeholder="admin@namupagalba.lt"
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Slaptažodis *
+                  </label>
+                  <input
+                    type="password"
+                    required
+                    value={adminLoginForm.password}
+                    onChange={(e) => {
+                      setAdminLoginForm((prev) => ({ ...prev, password: e.target.value }));
+                      setAdminLoginError('');
+                    }}
+                    placeholder="••••••••"
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm"
+                  />
+                </div>
+                {adminLoginError && (
+                  <p className="text-xs font-bold text-red-600">{adminLoginError}</p>
+                )}
+                <button
+                  type="submit"
+                  className="w-full py-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-sm cursor-pointer"
+                >
+                  Prisijungti kaip administratorius
+                </button>
               </form>
             )}
           </div>
@@ -4776,7 +3659,32 @@ export default function App() {
         {activeView === 'home' && renderHomeView()}
         {activeView === 'client' && renderClientView()}
         {activeView === 'master' && renderMasterView()}
-        {activeView === 'admin' && renderAdminView()}
+        {activeView === 'admin' &&
+          (isAdminLoggedIn ? (
+            renderAdminView()
+          ) : (
+            <div className="max-w-md mx-auto px-4 py-14">
+              <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-sm space-y-4 text-center">
+                <span className="text-xs font-extrabold uppercase tracking-wider text-amber-600">
+                  Apsaugota skiltis
+                </span>
+                <h1 className="text-xl font-black text-slate-900">
+                  Administratoriaus prisijungimas
+                </h1>
+                <p className="text-xs text-slate-600">
+                  Norėdami atidaryti administratoriaus panelę, prisijunkite su savo el. paštu ir
+                  slaptažodžiu.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => openRoleLoginModal('admin')}
+                  className="w-full py-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-extrabold cursor-pointer"
+                >
+                  Atidaryti admin prisijungimą
+                </button>
+              </div>
+            </div>
+          ))}
       </main>
 
       {renderModals()}
