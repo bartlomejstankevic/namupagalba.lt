@@ -494,6 +494,23 @@ export default function App() {
   const [clientJobSmsEnteredCode, setClientJobSmsEnteredCode] = useState('');
   const [clientJobSmsError, setClientJobSmsError] = useState('');
 
+  // --- PRISIJUNGIMO BŪSENOS (KLIENTAS / MEISTRAS / ADMIN) ---
+  const [loginModalRole, setLoginModalRole] = useState(null); // null | 'client' | 'master' | 'admin'
+  const [isClientLoggedIn, setIsClientLoggedIn] = useState(false);
+  const [clientSession, setClientSession] = useState({ name: '', phone: '' });
+  const [clientLoginForm, setClientLoginForm] = useState({ name: '', phone: '' });
+  const [clientLoginError, setClientLoginError] = useState('');
+
+  const [isMasterLoggedIn, setIsMasterLoggedIn] = useState(false);
+  const [masterLoginInput, setMasterLoginInput] = useState('+370 612 34567');
+  const [masterLoginSmsCode, setMasterLoginSmsCode] = useState('');
+  const [masterLoginSentCode, setMasterLoginSentCode] = useState('');
+  const [masterLoginError, setMasterLoginError] = useState('');
+
+  const [isAdminLoggedIn, setIsAdminLoggedIn] = useState(false);
+  const [adminLoginForm, setAdminLoginForm] = useState({ email: '', password: '' });
+  const [adminLoginError, setAdminLoginError] = useState('');
+
   // --- DUOMENŲ BŪSENOS ---
   const [categories, setCategories] = useState(INITIAL_CATEGORIES);
   const [masters, setMasters] = useState(INITIAL_MASTERS);
@@ -696,11 +713,173 @@ export default function App() {
     });
   };
 
-  const handleNavSectionClick = (section) => {
+  // --- ROLE-BASED PRISIJUNGIMO VALDYMAS ---
+  const openRoleLoginModal = (role) => {
     setMobileMenuOpen(false);
+<<<<<<< HEAD
     if (section === 'how') {
       setHowItWorksModalOpen(true);
       return;
+=======
+    if (role === 'client') {
+      if (isClientLoggedIn) {
+        setClientSubView('form');
+        setActiveView('client');
+        return;
+      }
+      setClientLoginForm({
+        name: clientSession.name || jobForm.clientName || '',
+        phone: clientSession.phone || jobForm.clientPhone || ''
+      });
+      setClientLoginError('');
+      setLoginModalRole('client');
+      return;
+    }
+
+    if (role === 'master') {
+      if (isMasterLoggedIn && currentMaster) {
+        setActiveView('master');
+        return;
+      }
+      setMasterLoginSentCode('');
+      setMasterLoginSmsCode('');
+      setMasterLoginError('');
+      setLoginModalRole('master');
+      return;
+    }
+
+    if (role === 'admin') {
+      if (isAdminLoggedIn) {
+        setActiveView('admin');
+        return;
+      }
+      setAdminLoginForm({ email: '', password: '' });
+      setAdminLoginError('');
+      setLoginModalRole('admin');
+    }
+  };
+
+  const handleClientLoginSubmit = (e) => {
+    e.preventDefault();
+    const cleanPhone = clientLoginForm.phone.trim();
+    if (!cleanPhone) {
+      setClientLoginError('Įveskite savo telefono numerį.');
+      return;
+    }
+    const cleanName = clientLoginForm.name.trim() || 'Klientas';
+    setClientSession({ name: cleanName, phone: cleanPhone });
+    setIsClientLoggedIn(true);
+    setJobForm((prev) => ({
+      ...prev,
+      clientName: cleanName,
+      clientPhone: cleanPhone
+    }));
+    setClientLoginError('');
+    setLoginModalRole(null);
+    setClientSubView('form');
+    setActiveView('client');
+    notify(`Prisijungėte kaip klientas (${cleanName}).`);
+  };
+
+  const handleSendMasterLoginCode = () => {
+    const cleanPhone = masterLoginInput.trim();
+    if (!cleanPhone) {
+      setMasterLoginError('Įveskite meistro telefono numerį.');
+      return;
+    }
+    const matchedMaster = masters.find(
+      (m) => m.phone.replace(/\s+/g, '') === cleanPhone.replace(/\s+/g, '')
+    );
+    if (!matchedMaster) {
+      setMasterLoginError(
+        'Meistras su tokiu telefono numeriu nerastas. Patikrinkite numerį arba spauskite „Tapti meistru“.'
+      );
+      return;
+    }
+    const code = String(Math.floor(1000 + Math.random() * 9000));
+    setCurrentMasterId(matchedMaster.id);
+    setMasterLoginSentCode(code);
+    setMasterLoginSmsCode(code);
+    setMasterLoginError('');
+    notify(`SMS kodas išsiųstas meistrui ${matchedMaster.name} (${matchedMaster.phone}).`);
+  };
+
+  const handleMasterLoginSubmit = (e) => {
+    e.preventDefault();
+    const cleanPhone = masterLoginInput.trim();
+    const matchedMaster =
+      masters.find((m) => m.phone.replace(/\s+/g, '') === cleanPhone.replace(/\s+/g, '')) ||
+      masters.find((m) => m.id === currentMasterId);
+
+    if (!matchedMaster) {
+      setMasterLoginError('Nerastas meistro profilis.');
+      return;
+    }
+
+    if (matchedMaster.status === 'uzblokuotas') {
+      setMasterLoginError('Ši meistro paskyra yra užblokuota. Kreipkitės į administratorių.');
+      return;
+    }
+
+    if (!masterLoginSentCode) {
+      setMasterLoginError('Pirmiausia paspauskite „Gauti SMS kodą“ arba naudokite greitą prisijungimą.');
+      return;
+    }
+
+    if (masterLoginSmsCode.trim() !== masterLoginSentCode) {
+      setMasterLoginError('Neteisingas SMS patvirtinimo kodas.');
+      return;
+    }
+
+    setCurrentMasterId(matchedMaster.id);
+    setIsMasterLoggedIn(true);
+    setMasterLoginError('');
+    setLoginModalRole(null);
+    setActiveView('master');
+    notify(`Sveiki sugrįžę, ${matchedMaster.name}!`);
+  };
+
+  const handleAdminLoginSubmit = (e) => {
+    e.preventDefault();
+    const cleanEmail = adminLoginForm.email.trim().toLowerCase();
+    const cleanPass = adminLoginForm.password.trim();
+    if (!cleanEmail || !cleanPass) {
+      setAdminLoginError('Įveskite administratoriaus el. paštą ir slaptažodį.');
+      return;
+    }
+    const isValidAdmin =
+      (cleanEmail === 'admin@namupagalba.lt' && cleanPass.length >= 4) ||
+      (cleanEmail.includes('admin') && cleanPass.length >= 6);
+
+    if (!isValidAdmin) {
+      setAdminLoginError(
+        'Neteisingi duomenys. Naudokite admin@namupagalba.lt ir slaptažodį (bent 6 simboliai).'
+      );
+      return;
+    }
+
+    setIsAdminLoggedIn(true);
+    setAdminLoginError('');
+    setLoginModalRole(null);
+    setActiveView('admin');
+    notify('Sėkmingai prisijungėte prie administratoriaus panelės.');
+  };
+
+  const handleLogoutRole = (role) => {
+    if (role === 'client') {
+      setIsClientLoggedIn(false);
+      setClientSession({ name: '', phone: '' });
+      if (activeView === 'client') setActiveView('home');
+      notify('Atsijungėte nuo kliento paskyros.');
+    } else if (role === 'master') {
+      setIsMasterLoggedIn(false);
+      if (activeView === 'master') setActiveView('home');
+      notify('Atsijungėte nuo meistro kabineto.');
+    } else if (role === 'admin') {
+      setIsAdminLoggedIn(false);
+      if (activeView === 'admin') setActiveView('home');
+      notify('Atsijungėte nuo administratoriaus panelės.');
+>>>>>>> 890a9086a604ab17944e25193392f52db7d4a9aa
     }
     const targetRef =
       section === 'services'
@@ -1835,6 +2014,60 @@ export default function App() {
           </div>
         </button>
 
+<<<<<<< HEAD
+=======
+        {/* 3 aiškiai atskirti vaidmenų mygtukai: Klientas / Meistras / Admin */}
+        <div className="order-3 sm:order-2 w-full sm:w-auto flex items-center justify-between sm:justify-start gap-1.5 bg-slate-100 p-1 rounded-2xl border border-slate-200/80">
+          <button
+            type="button"
+            onClick={() => openRoleLoginModal('client')}
+            className={`flex-1 sm:flex-initial px-2.5 sm:px-3.5 py-2 sm:py-1.5 rounded-xl text-[11px] sm:text-xs font-bold transition cursor-pointer text-center flex items-center justify-center gap-1 ${
+              activeView === 'client'
+                ? 'bg-white text-blue-600 shadow-2xs border border-blue-100'
+                : 'text-slate-700 hover:text-slate-950 hover:bg-white/60'
+            }`}
+          >
+            <span>Klientas</span>
+            {isClientLoggedIn && (
+              <span className="w-2 h-2 rounded-full bg-emerald-500" title="Prisijungęs" />
+            )}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => openRoleLoginModal('master')}
+            className={`flex-1 sm:flex-initial px-2.5 sm:px-3.5 py-2 sm:py-1.5 rounded-xl text-[11px] sm:text-xs font-bold transition cursor-pointer text-center flex items-center justify-center gap-1 ${
+              activeView === 'master'
+                ? 'bg-white text-blue-600 shadow-2xs border border-blue-100'
+                : 'text-slate-700 hover:text-slate-950 hover:bg-white/60'
+            }`}
+          >
+            <span>Meistras</span>
+            {isMasterLoggedIn && (
+              <span className="w-2 h-2 rounded-full bg-emerald-500" title="Prisijungęs" />
+            )}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => openRoleLoginModal('admin')}
+            className={`flex-1 sm:flex-initial px-2.5 sm:px-3.5 py-2 sm:py-1.5 rounded-xl text-[11px] sm:text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
+              activeView === 'admin'
+                ? 'bg-slate-900 text-white shadow-2xs'
+                : 'text-slate-700 hover:text-slate-950 hover:bg-white/60'
+            }`}
+          >
+            <span>Admin</span>
+            {pendingApprovalMasters.length > 0 && (
+              <span className="px-1.5 py-0.2 rounded-full text-[10px] font-extrabold bg-amber-400 text-slate-950">
+                {pendingApprovalMasters.length}
+              </span>
+            )}
+          </button>
+        </div>
+
+        {/* Desktop nuorodos + Tapti meistru */}
+>>>>>>> 890a9086a604ab17944e25193392f52db7d4a9aa
         <nav className="hidden xl:flex items-center gap-5 text-xs font-semibold text-slate-600">
           <button
             type="button"
@@ -1864,6 +2097,16 @@ export default function App() {
           >
             DUK
           </button>
+<<<<<<< HEAD
+=======
+          <button
+            type="button"
+            onClick={() => openRoleLoginModal('master')}
+            className="hover:text-slate-900 font-bold text-slate-800 transition cursor-pointer"
+          >
+            Prisijungti
+          </button>
+>>>>>>> 890a9086a604ab17944e25193392f52db7d4a9aa
         </nav>
 
         <div className="flex items-center gap-1.5 sm:gap-2">
@@ -2511,6 +2754,7 @@ export default function App() {
   // KLIENTO PUSLAPIS ('client')
   // ==========================================================================
 
+<<<<<<< HEAD
   const renderClientView = () => {
     const showAccountShell = isClientLoggedIn || clientSubView === 'support';
 
@@ -2518,6 +2762,96 @@ export default function App() {
       <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8 space-y-8">
         {showAccountShell ? (
           <div className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-5 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+=======
+  const renderClientView = () => (
+    <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8 space-y-8">
+      {/* Viršutinis kliento perjungiklis */}
+      <div className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-5 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[11px] font-extrabold uppercase tracking-wider text-blue-600">
+              Kliento paskyra
+            </span>
+            {isClientLoggedIn && (
+              <span className="px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[11px] font-bold">
+                ✓ {clientSession.name || 'Klientas'} ({clientSession.phone})
+              </span>
+            )}
+          </div>
+          <h1 className="text-xl sm:text-2xl font-black text-slate-900">
+            {clientSubView === 'form'
+              ? 'Paskelbti užklausą meistrui'
+              : clientSubView === 'support'
+              ? 'Pagalba klientui – susirašinėjimas su admin'
+              : 'Mano užsakymai ir meistrų pasiūlymai'}
+          </h1>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setClientSubView('form')}
+            className={`px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition cursor-pointer ${
+              clientSubView === 'form'
+                ? 'bg-blue-600 text-white shadow-xs'
+                : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+            }`}
+          >
+            Paskelbti užklausą
+          </button>
+
+          <button
+            type="button"
+            onClick={goToClientOrders}
+            className={`px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition cursor-pointer ${
+              clientSubView === 'orders'
+                ? 'bg-blue-600 text-white shadow-xs'
+                : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+            }`}
+          >
+            Mano užsakymai ir pasiūlymai ({jobs.length})
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setClientSubView('support')}
+            className={`px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition cursor-pointer ${
+              clientSubView === 'support'
+                ? 'bg-blue-600 text-white shadow-xs'
+                : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+            }`}
+          >
+            Pagalba
+          </button>
+
+          {isClientLoggedIn ? (
+            <button
+              type="button"
+              onClick={() => handleLogoutRole('client')}
+              className="px-3.5 py-2.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-xs font-bold text-slate-700 cursor-pointer"
+            >
+              Atsijungti
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => openRoleLoginModal('client')}
+              className="px-3.5 py-2.5 rounded-xl border border-blue-200 bg-blue-50 hover:bg-blue-100 text-xs font-extrabold text-blue-700 cursor-pointer"
+            >
+              Prisijungti
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* KLIENTO SKILTIS: PAGALBA */}
+      {clientSubView === 'support' && (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          <form
+            onSubmit={handleSendClientSupportMessage}
+            className="lg:col-span-6 bg-white rounded-2xl border border-slate-200 p-6 shadow-2xs space-y-4 h-fit"
+          >
+>>>>>>> 890a9086a604ab17944e25193392f52db7d4a9aa
             <div>
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-[11px] font-extrabold uppercase tracking-wider text-blue-600">
@@ -3250,6 +3584,7 @@ export default function App() {
                 {tab.label}
               </button>
             ))}
+<<<<<<< HEAD
 
             {isMasterLoggedIn && (
               <button
@@ -3907,8 +4242,28 @@ export default function App() {
           <h1 className="text-xl sm:text-2xl font-black text-slate-900">
             namupagalba.lt – Admin panelė
           </h1>
-        </div>
+=======
 
+            {isMasterLoggedIn ? (
+              <button
+                type="button"
+                onClick={() => handleLogoutRole('master')}
+                className="px-3.5 py-2 rounded-xl border border-slate-200 hover:bg-slate-50 text-xs font-bold text-slate-700 cursor-pointer"
+              >
+                Atsijungti
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => openRoleLoginModal('master')}
+                className="px-3.5 py-2 rounded-xl border border-blue-200 bg-blue-50 hover:bg-blue-100 text-xs font-extrabold text-blue-700 cursor-pointer"
+              >
+                Prisijungti
+              </button>
+            )}
+          </div>
+>>>>>>> 890a9086a604ab17944e25193392f52db7d4a9aa
+        </div>
         <div className="flex items-center gap-2 flex-wrap">
           {[
             {
@@ -3944,8 +4299,19 @@ export default function App() {
               )}
             </button>
           ))}
+
+          {isAdminLoggedIn && (
+            <button
+              type="button"
+              onClick={() => handleLogoutRole('admin')}
+              className="px-3.5 py-2.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-xs font-bold text-slate-700 cursor-pointer"
+            >
+              Atsijungti
+            </button>
+          )}
         </div>
       </div>
+<<<<<<< HEAD
 
       {adminSubTab === 'messages' && (
         <div className="space-y-4">
@@ -4618,6 +4984,8 @@ export default function App() {
                   {loginRole === 'master' ? 'Meistro prisijungimas' : 'Kliento prisijungimas'}
                 </h2>
               </div>
+=======
+>>>>>>> 890a9086a604ab17944e25193392f52db7d4a9aa
               <button
                 type="button"
                 onClick={() => setLoginModalOpen(false)}
@@ -4791,16 +5159,33 @@ export default function App() {
       )}
 
       {becomeMasterOpen && (
+  // MODALAI (BDAR/TEISINIAI DOKUMENTAI, UŽSAKYMAS, PROFILIAI, ADMIN, SMS)
+  // ==========================================================================
+
+  const renderModals = () => (
+    <>
+      {/* PRISIJUNGIMO MODALAI: KLIENTAS / MEISTRAS / ADMIN */}
+      {loginModalRole && (
         <div
+<<<<<<< HEAD
           onClick={() => setBecomeMasterOpen(false)}
           className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4"
         >
           <div
             onClick={(e) => e.stopPropagation()}
             className="bg-white rounded-3xl border border-slate-200 max-w-xl w-full p-6 sm:p-8 shadow-2xl space-y-5 max-h-[90vh] overflow-y-auto"
+=======
+          onClick={() => setLoginModalRole(null)}
+          className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-2xs flex items-center justify-center p-4"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="bg-white rounded-3xl border border-slate-200 shadow-2xl w-full max-w-md p-6 space-y-5"
+>>>>>>> 890a9086a604ab17944e25193392f52db7d4a9aa
           >
             <div className="flex items-start justify-between gap-4">
               <div>
+<<<<<<< HEAD
                 <span className="text-xs font-extrabold uppercase tracking-wider text-amber-600">
                   Meistro registracija
                 </span>
@@ -4810,11 +5195,33 @@ export default function App() {
                 type="button"
                 onClick={() => setBecomeMasterOpen(false)}
                 className="p-2 rounded-xl hover:bg-slate-100 text-slate-500 cursor-pointer"
+=======
+                <span className="text-[11px] font-extrabold uppercase tracking-wider text-blue-600">
+                  {loginModalRole === 'client'
+                    ? 'Kliento prisijungimas'
+                    : loginModalRole === 'master'
+                    ? 'Meistro kabineto prisijungimas'
+                    : 'Administratoriaus prisijungimas'}
+                </span>
+                <h3 className="text-lg font-black text-slate-900 mt-0.5">
+                  {loginModalRole === 'client'
+                    ? 'Prisijungti kaip klientui'
+                    : loginModalRole === 'master'
+                    ? 'Prisijungti prie meistro kabineto'
+                    : 'Prisijungti prie admin panelės'}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setLoginModalRole(null)}
+                className="p-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 cursor-pointer"
+>>>>>>> 890a9086a604ab17944e25193392f52db7d4a9aa
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
+<<<<<<< HEAD
             {smsStep === 'form' ? (
               <form onSubmit={handleRequestSmsCode} className="space-y-4">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -4864,6 +5271,76 @@ export default function App() {
                       placeholder="meistras@pastas.lt"
                       className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm"
                     />
+=======
+            {loginModalRole === 'client' && (
+              <form onSubmit={handleClientLoginSubmit} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Jūsų vardas
+                  </label>
+                  <input
+                    type="text"
+                    value={clientLoginForm.name}
+                    onChange={(e) =>
+                      setClientLoginForm((prev) => ({ ...prev, name: e.target.value }))
+                    }
+                    placeholder="Pvz., Greta"
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Telefono numeris *
+                  </label>
+                  <input
+                    type="tel"
+                    required
+                    value={clientLoginForm.phone}
+                    onChange={(e) =>
+                      setClientLoginForm((prev) => ({ ...prev, phone: e.target.value }))
+                    }
+                    placeholder="+370 6XX XXXXX"
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm"
+                  />
+                </div>
+                {clientLoginError && (
+                  <p className="text-xs font-bold text-red-600">{clientLoginError}</p>
+                )}
+                <button
+                  type="submit"
+                  className="w-full py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-sm cursor-pointer"
+                >
+                  Prisijungti kaip klientas
+                </button>
+              </form>
+            )}
+
+            {loginModalRole === 'master' && (
+              <form onSubmit={handleMasterLoginSubmit} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Meistro telefono numeris *
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type="tel"
+                      required
+                      value={masterLoginInput}
+                      onChange={(e) => {
+                        setMasterLoginInput(e.target.value);
+                        setMasterLoginError('');
+                      }}
+                      placeholder="+370 612 34567"
+                      className="flex-1 px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-semibold"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleSendMasterLoginCode}
+                      className="px-3.5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-extrabold shrink-0 cursor-pointer"
+                    >
+                      Gauti SMS kodą
+                    </button>
+>>>>>>> 890a9086a604ab17944e25193392f52db7d4a9aa
                   </div>
                   <div>
                     <label className="block text-xs font-bold text-slate-700 mb-1">Miestas</label>
@@ -4883,6 +5360,7 @@ export default function App() {
                   </div>
                 </div>
 
+<<<<<<< HEAD
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1.5">
                     Paslaugų sritys
@@ -4905,11 +5383,17 @@ export default function App() {
                         </button>
                       );
                     })}
+=======
+                {masterLoginSentCode && (
+                  <div className="rounded-xl bg-blue-50 border border-blue-200 p-3 text-xs text-blue-900">
+                    Testavimo SMS kodas: <strong>{masterLoginSentCode}</strong>
+>>>>>>> 890a9086a604ab17944e25193392f52db7d4a9aa
                   </div>
-                </div>
+                )}
 
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">
+<<<<<<< HEAD
                     Trumpai apie patirtį
                   </label>
                   <textarea
@@ -4954,11 +5438,28 @@ export default function App() {
                     value={enteredSmsCode}
                     onChange={(e) => setEnteredSmsCode(e.target.value)}
                     className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-bold tracking-widest"
+=======
+                    SMS patvirtinimo kodas *
+                  </label>
+                  <input
+                    type="text"
+                    maxLength={4}
+                    value={masterLoginSmsCode}
+                    onChange={(e) => {
+                      setMasterLoginSmsCode(e.target.value);
+                      setMasterLoginError('');
+                    }}
+                    placeholder="4 skaitmenų kodas"
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-black tracking-widest"
+>>>>>>> 890a9086a604ab17944e25193392f52db7d4a9aa
                   />
                 </div>
 
-                {smsError && <p className="text-xs font-bold text-red-600">{smsError}</p>}
+                {masterLoginError && (
+                  <p className="text-xs font-bold text-red-600">{masterLoginError}</p>
+                )}
 
+<<<<<<< HEAD
                 <div className="flex items-center justify-between gap-2">
                   <button
                     type="button"
@@ -4972,8 +5473,85 @@ export default function App() {
                     className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold cursor-pointer"
                   >
                     Patvirtinti ir sukurti paskyrą
+=======
+                <button
+                  type="submit"
+                  className="w-full py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-sm cursor-pointer"
+                >
+                  Prisijungti į meistro kabinetą
+                </button>
+
+                <div className="flex items-center justify-between text-xs pt-1 border-t border-slate-100">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsMasterLoggedIn(true);
+                      setLoginModalRole(null);
+                      setActiveView('master');
+                      notify(`Prisijungta prie meistro kabineto (${currentMaster?.name || 'Meistras'}).`);
+                    }}
+                    className="font-bold text-slate-600 hover:text-slate-900 underline cursor-pointer"
+                  >
+                    Greitas prisijungimas (testui)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setLoginModalRole(null);
+                      openBecomeMasterModal();
+                    }}
+                    className="font-extrabold text-amber-600 hover:underline cursor-pointer"
+                  >
+                    Neturi paskyros? Tapti meistru →
+>>>>>>> 890a9086a604ab17944e25193392f52db7d4a9aa
                   </button>
                 </div>
+              </form>
+            )}
+
+            {loginModalRole === 'admin' && (
+              <form onSubmit={handleAdminLoginSubmit} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Administratoriaus el. paštas *
+                  </label>
+                  <input
+                    type="email"
+                    required
+                    value={adminLoginForm.email}
+                    onChange={(e) => {
+                      setAdminLoginForm((prev) => ({ ...prev, email: e.target.value }));
+                      setAdminLoginError('');
+                    }}
+                    placeholder="admin@namupagalba.lt"
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Slaptažodis *
+                  </label>
+                  <input
+                    type="password"
+                    required
+                    value={adminLoginForm.password}
+                    onChange={(e) => {
+                      setAdminLoginForm((prev) => ({ ...prev, password: e.target.value }));
+                      setAdminLoginError('');
+                    }}
+                    placeholder="••••••••"
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm"
+                  />
+                </div>
+                {adminLoginError && (
+                  <p className="text-xs font-bold text-red-600">{adminLoginError}</p>
+                )}
+                <button
+                  type="submit"
+                  className="w-full py-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-sm cursor-pointer"
+                >
+                  Prisijungti kaip administratorius
+                </button>
               </form>
             )}
           </div>
@@ -5433,7 +6011,32 @@ export default function App() {
         {activeView === 'home' && renderHomeView()}
         {activeView === 'client' && renderClientView()}
         {activeView === 'master' && renderMasterView()}
-        {activeView === 'admin' && renderAdminView()}
+        {activeView === 'admin' &&
+          (isAdminLoggedIn ? (
+            renderAdminView()
+          ) : (
+            <div className="max-w-md mx-auto px-4 py-14">
+              <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-sm space-y-4 text-center">
+                <span className="text-xs font-extrabold uppercase tracking-wider text-amber-600">
+                  Apsaugota skiltis
+                </span>
+                <h1 className="text-xl font-black text-slate-900">
+                  Administratoriaus prisijungimas
+                </h1>
+                <p className="text-xs text-slate-600">
+                  Norėdami atidaryti administratoriaus panelę, prisijunkite su savo el. paštu ir
+                  slaptažodžiu.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => openRoleLoginModal('admin')}
+                  className="w-full py-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-extrabold cursor-pointer"
+                >
+                  Atidaryti admin prisijungimą
+                </button>
+              </div>
+            </div>
+          ))}
       </main>
 
       {renderModals()}
@@ -5513,6 +6116,7 @@ export default function App() {
     </div>
   );
 }
+<<<<<<< HEAD
 
 // ============================================================================
 // SLAPUKŲ PRANEŠIMAS IR NUSTATYMAI
@@ -5603,3 +6207,5 @@ function CookieSettingsModal({ initial, onSave, onClose, onPolicy }) {
     </div>
   );
 }
+=======
+>>>>>>> 890a9086a604ab17944e25193392f52db7d4a9aa
